@@ -282,11 +282,34 @@ def _panel(
     )
 
 
+# Page dimensions in inches, pre-adjusted for Graphviz margin (0.25in each side).
+# Graphviz adds its own margin around the size attribute, so we subtract it
+# to land on exact paper dimensions in the final PDF.
+_MARGIN_IN = 0.25
+PAGE_FORMATS = {
+    "a4":     {"portrait": (8.27, 11.69),  "landscape": (11.69, 8.27)},
+    "letter": {"portrait": (8.5,  11.0),   "landscape": (11.0,  8.5)},
+    "a3":     {"portrait": (11.69, 16.54), "landscape": (16.54, 11.69)},
+}
+
+
 def generate_diagram(
     data: dict,
     output_filename: str = "openshift_architecture",
+    page_format: Optional[str] = None,
+    orientation: Optional[str] = None,
+    formats: Optional[List[str]] = None,
 ) -> None:
-    """Three equal-width section boxes with visible gaps between them."""
+    """Three equal-width section boxes with visible gaps between them.
+
+    Args:
+        page_format: Optional paper size for PDF: "a4", "letter", "a3".
+                     None keeps native Graphviz sizing (backward compat).
+        orientation: Optional "portrait" or "landscape". None auto-selects
+                     based on node count (>12 nodes = landscape).
+        formats: Output formats to render. Default: ["png", "pdf"].
+                 Use ["pdf"] to skip PNG rendering.
+    """
     from openshift_mg import sort_buckets_health_first
 
     buckets = sort_buckets_health_first(
@@ -342,10 +365,36 @@ def generate_diagram(
     dot.edge("panel_info", "panel_config")
     dot.edge("panel_config", "panel_nodes")
 
-    print(f"\nRendering diagram to {output_filename}.png and {output_filename}.pdf...")
-    dot.render(output_filename, format="png", cleanup=True)
-    dot.render(output_filename, format="pdf", cleanup=True)
-    print("Done. Check your current directory for the generated files.")
+    if formats is None:
+        formats = ["png", "pdf"]
+
+    render_png = "png" in formats
+    render_pdf = "pdf" in formats
+
+    suffixes = [f".{f}" for f in formats]
+    print(f"\nRendering diagram to {output_filename}{' and '.join(suffixes)}...")
+
+    if render_png:
+        dot.render(output_filename, format="png", cleanup=True)
+
+    if render_pdf:
+        if page_format and page_format.lower() in PAGE_FORMATS:
+            fmt = PAGE_FORMATS[page_format.lower()]
+            if orientation and orientation.lower() in ("portrait", "landscape"):
+                orient = orientation.lower()
+            else:
+                node_count = len(data.get("nodes") or [])
+                orient = "landscape" if node_count > 12 else "portrait"
+            w, h = fmt[orient]
+            content_w = w - 2 * _MARGIN_IN
+            content_h = h - 2 * _MARGIN_IN
+            dot.graph_attr["pad"] = "0"
+            dot.graph_attr["margin"] = str(_MARGIN_IN)
+            dot.graph_attr["size"] = f"{content_w:.2f},{content_h:.2f}!"
+            dot.graph_attr["ratio"] = "fill"
+        dot.render(output_filename, format="pdf", cleanup=True)
+
+    print("Done.")
 
 
 def main(argv: Optional[List[str]] = None) -> int:
